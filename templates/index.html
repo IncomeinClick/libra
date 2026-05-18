@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Libra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { background: #0f172a; color: #e2e8f0; font-family: 'Poppins', sans-serif; }
+  h1, h2, h3, .tab-active, button { font-family: 'Montserrat', sans-serif; }
+  .tab-active { border-bottom: 3px solid #f59e0b; color: #f59e0b; }
+  .toast { animation: fadeInOut 2s ease-in-out; }
+  @keyframes fadeInOut {
+    0% { opacity: 0; transform: translateY(20px); }
+    15% { opacity: 1; transform: translateY(0); }
+    85% { opacity: 1; transform: translateY(0); }
+    100% { opacity: 0; transform: translateY(-10px); }
+  }
+</style>
+</head>
+<body class="min-h-screen">
+
+<!-- Login -->
+<div id="login-page" class="flex items-center justify-center min-h-screen p-4">
+  <div class="bg-slate-800 rounded-2xl p-8 w-full max-w-sm">
+    <h1 class="text-3xl font-bold text-amber-400 mb-2 text-center">Libra</h1>
+    <p class="text-slate-400 text-center mb-6">KDP Ebook Manager</p>
+    <input id="username" type="email" placeholder="Email"
+      class="w-full p-3 rounded-lg bg-slate-700 border border-slate-600 text-white mb-3 focus:outline-none focus:border-amber-400">
+    <input id="password" type="password" placeholder="Password"
+      class="w-full p-3 rounded-lg bg-slate-700 border border-slate-600 text-white mb-4 focus:outline-none focus:border-amber-400"
+      onkeydown="if(event.key==='Enter')doLogin()">
+    <button onclick="doLogin()"
+      class="w-full p-3 rounded-lg bg-amber-500 text-slate-900 font-bold hover:bg-amber-400">
+      Login
+    </button>
+    <p id="login-error" class="text-red-400 text-sm mt-2 hidden">Wrong email or password</p>
+  </div>
+</div>
+
+<!-- Dashboard -->
+<div id="dashboard" class="hidden">
+  <!-- Header -->
+  <div class="sticky top-0 bg-slate-900/95 backdrop-blur border-b border-slate-700 z-50">
+    <div class="max-w-2xl mx-auto px-4 py-3">
+      <h1 class="text-xl font-bold text-amber-400">Libra</h1>
+    </div>
+    <!-- Tabs -->
+    <div class="max-w-2xl mx-auto px-4 flex gap-6">
+      <button onclick="switchTab('ready')" id="tab-ready"
+        class="pb-3 text-sm font-medium tab-active">
+        Queue <span id="count-ready" class="bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full text-xs ml-1">0</span>
+      </button>
+      <button onclick="switchTab('uploaded')" id="tab-uploaded"
+        class="pb-3 text-sm font-medium text-slate-400 hover:text-slate-200">
+        Uploaded <span id="count-uploaded" class="bg-slate-600 text-slate-300 px-2 py-0.5 rounded-full text-xs ml-1">0</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Book list -->
+  <div class="max-w-2xl mx-auto px-4 py-4">
+    <div id="book-list" class="space-y-4"></div>
+    <div id="empty-state" class="hidden text-center text-slate-500 py-16">
+      <p class="text-lg">No books here yet</p>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 bg-emerald-600 text-white px-4 py-2 rounded-lg shadow-lg hidden text-sm font-medium"></div>
+
+<script>
+let allBooks = [];
+let currentTab = 'ready';
+let uploadedPage = 0;
+const UPLOADED_PER_PAGE = 2;
+
+async function doLogin() {
+  const un = document.getElementById('username').value;
+  const pw = document.getElementById('password').value;
+  const res = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({username: un, password: pw})
+  });
+  if (res.ok) {
+    document.getElementById('login-page').classList.add('hidden');
+    document.getElementById('dashboard').classList.remove('hidden');
+    loadBooks();
+  } else {
+    document.getElementById('login-error').classList.remove('hidden');
+  }
+}
+
+async function loadBooks() {
+  const res = await fetch('/api/books');
+  if (res.status === 401) {
+    document.getElementById('login-page').classList.remove('hidden');
+    document.getElementById('dashboard').classList.add('hidden');
+    return;
+  }
+  allBooks = await res.json();
+  updateCounts();
+  renderBooks();
+}
+
+function updateCounts() {
+  document.getElementById('count-ready').textContent = allBooks.filter(b => b.status === 'ready').length;
+  document.getElementById('count-uploaded').textContent = allBooks.filter(b => b.status === 'uploaded').length;
+}
+
+function switchTab(tab) {
+  currentTab = tab;
+  document.getElementById('tab-ready').className = tab === 'ready'
+    ? 'pb-3 text-sm font-medium tab-active'
+    : 'pb-3 text-sm font-medium text-slate-400 hover:text-slate-200';
+  document.getElementById('tab-uploaded').className = tab === 'uploaded'
+    ? 'pb-3 text-sm font-medium tab-active'
+    : 'pb-3 text-sm font-medium text-slate-400 hover:text-slate-200';
+  uploadedPage = 0;
+  renderBooks();
+}
+
+function renderBooks() {
+  let filtered = allBooks.filter(b => b.status === currentTab);
+  // Sort uploaded by uploaded_at descending
+  if (currentTab === 'uploaded') {
+    filtered.sort((a, b) => (b.uploaded_at || '').localeCompare(a.uploaded_at || ''));
+  }
+
+  const list = document.getElementById('book-list');
+  const empty = document.getElementById('empty-state');
+
+  if (filtered.length === 0) {
+    list.innerHTML = '';
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+
+  // Pagination for uploaded tab
+  let toRender = filtered;
+  let paginationHtml = '';
+  if (currentTab === 'uploaded') {
+    const totalPages = Math.ceil(filtered.length / UPLOADED_PER_PAGE);
+    toRender = filtered.slice(uploadedPage * UPLOADED_PER_PAGE, (uploadedPage + 1) * UPLOADED_PER_PAGE);
+    if (totalPages > 1) {
+      paginationHtml = `
+        <div class="flex items-center justify-center gap-3 mt-4">
+          <button onclick="changePage(-1)" ${uploadedPage === 0 ? 'disabled' : ''}
+            class="px-4 py-2 rounded-lg text-sm font-medium ${uploadedPage === 0 ? 'bg-slate-800 text-slate-600 cursor-not-allowed' : 'bg-slate-700 text-slate-200 hover:bg-slate-600'}">
+            Prev
+          </button>
+          <span class="text-slate-400 text-sm">${uploadedPage + 1} / ${totalPages}</span>
+          <button onclick="changePage(1)" ${uploadedPage >= totalPages - 1 ? 'disabled' : ''}
+            class="px-4 py-2 rounded-lg text-sm font-medium ${uploadedPage >= totalPages - 1 ? 'bg-slate-800 text-slate-600 cursor-not-allowed' : 'bg-slate-700 text-slate-200 hover:bg-slate-600'}">
+            Next
+          </button>
+        </div>
+      `;
+    }
+  }
+
+  const isUploaded = currentTab === 'uploaded';
+
+  list.innerHTML = toRender.map(book => `
+    <div class="bg-slate-800 rounded-xl overflow-hidden border border-slate-700">
+      <!-- Header (always visible) -->
+      <div class="flex gap-4 p-4 ${isUploaded ? 'cursor-pointer' : ''}" ${isUploaded ? `onclick="toggleCard('${book.slug}')"` : ''}>
+        ${book.has_cover ? `<img src="/api/books/${book.slug}/cover" class="w-20 h-28 object-cover rounded-lg flex-shrink-0">` : ''}
+        <div class="min-w-0 flex-1">
+          <h2 class="font-bold text-white text-sm leading-tight">${book.title}</h2>
+          <p class="text-slate-400 text-xs mt-1 leading-tight">${book.subtitle || ''}</p>
+          <p class="text-slate-500 text-xs mt-2">${book.created_at}${book.uploaded_at ? ' · Uploaded ' + book.uploaded_at : ''}</p>
+        </div>
+        ${isUploaded ? `<span id="arrow-${book.slug}" class="text-slate-500 flex-shrink-0 transition-transform">&#9660;</span>` : ''}
+      </div>
+
+      <!-- Collapsible body -->
+      <div id="body-${book.slug}" class="${isUploaded ? 'hidden' : ''}">
+        <!-- Listing Details -->
+        <div class="border-t border-slate-700 px-4 py-3 space-y-2">
+          <p class="text-xs text-slate-500 uppercase font-semibold tracking-wider">Listing Details</p>
+          ${copyRow('Title', book.title)}
+          ${copyRow('Subtitle', book.subtitle || '')}
+          ${copyRow('Description', book.description || '', true)}
+          ${keywordRows(book.keywords || [])}
+          ${copyRow('Ebook Price', book.ebook_price || book.price || '')}
+          ${book.paperback_price ? copyRow('Paperback Price', book.paperback_price) : ''}
+          ${copyRow('Categories', (book.categories || []).join(' | '))}
+          ${copyRow('Language', book.language || '')}
+        </div>
+
+        <!-- Files + Actions -->
+        <div class="border-t border-slate-700 px-4 py-3 flex flex-wrap gap-2">
+          ${book.has_epub ? `<a href="/api/books/${book.slug}/epub" class="flex-1 text-center px-3 py-2 bg-amber-500/10 text-amber-400 rounded-lg text-sm font-medium hover:bg-amber-500/20">EPUB</a>` : ''}
+          ${book.has_pdf ? `<a href="/api/books/${book.slug}/pdf" class="flex-1 text-center px-3 py-2 bg-purple-500/10 text-purple-400 rounded-lg text-sm font-medium hover:bg-purple-500/20">PDF</a>` : `<button onclick="generatePdf('${book.slug}')" id="gen-pdf-${book.slug}" class="flex-1 text-center px-3 py-2 bg-purple-500/10 text-purple-400 rounded-lg text-sm font-medium hover:bg-purple-500/20">Generate PDF</button>`}
+          ${book.has_cover ? `<a href="/api/books/${book.slug}/cover" download class="flex-1 text-center px-3 py-2 bg-blue-500/10 text-blue-400 rounded-lg text-sm font-medium hover:bg-blue-500/20">Cover</a>` : ''}
+        </div>
+
+        ${book.status === 'ready' ? `
+        <div class="border-t border-slate-700 px-4 py-3">
+          <button onclick="markStatus('${book.slug}', 'uploaded')"
+            class="w-full px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-bold hover:bg-emerald-500">
+            Mark as Uploaded
+          </button>
+        </div>
+        ` : `
+        <div class="border-t border-slate-700 px-4 py-3">
+          <button onclick="markStatus('${book.slug}', 'ready')"
+            class="w-full px-4 py-2 bg-slate-700 text-slate-300 rounded-lg text-sm hover:bg-slate-600">
+            Move back to Queue
+          </button>
+        </div>
+        `}
+      </div>
+    </div>
+  `).join('') + paginationHtml;
+}
+
+function toggleCard(slug) {
+  const body = document.getElementById('body-' + slug);
+  const arrow = document.getElementById('arrow-' + slug);
+  if (body.classList.contains('hidden')) {
+    body.classList.remove('hidden');
+    arrow.style.transform = 'rotate(180deg)';
+  } else {
+    body.classList.add('hidden');
+    arrow.style.transform = '';
+  }
+}
+
+async function generatePdf(slug) {
+  const btn = document.getElementById('gen-pdf-' + slug);
+  btn.textContent = 'Generating...';
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/books/' + slug + '/generate-pdf', { method: 'POST' });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Failed');
+    }
+    showToast('PDF generated!');
+    // Reload books to update the button
+    const booksRes = await fetch('/api/books');
+    allBooks = await booksRes.json();
+    renderBooks();
+  } catch (e) {
+    btn.textContent = 'Failed';
+    showToast('Error: ' + e.message);
+    setTimeout(() => { btn.textContent = 'Generate PDF'; btn.disabled = false; }, 3000);
+  }
+}
+
+function changePage(delta) {
+  const filtered = allBooks.filter(b => b.status === 'uploaded');
+  const totalPages = Math.ceil(filtered.length / UPLOADED_PER_PAGE);
+  uploadedPage = Math.max(0, Math.min(totalPages - 1, uploadedPage + delta));
+  renderBooks();
+}
+
+function keywordRows(keywords) {
+  if (!keywords.length) return '';
+  return `
+    <div>
+      <span class="text-xs text-slate-500">Keywords</span>
+      <div class="mt-1 space-y-1">
+        ${keywords.map((kw, i) => {
+          const escaped = kw.replace(/'/g, "\\'");
+          return `
+            <div class="flex items-center justify-between gap-2 bg-slate-700/40 rounded px-2.5 py-1.5">
+              <span class="text-sm text-slate-200 truncate">${kw}</span>
+              <button onclick="copyText('${escaped}')"
+                class="flex-shrink-0 px-2 py-0.5 bg-slate-600 text-slate-300 rounded text-xs hover:bg-slate-500 hover:text-white">
+                Copy
+              </button>
+            </div>`;
+        }).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function copyRow(label, value, long = false) {
+  const escaped = value.replace(/'/g, "\\'").replace(/\n/g, "\\n");
+  return `
+    <div class="flex items-start justify-between gap-2">
+      <div class="min-w-0 flex-1">
+        <span class="text-xs text-slate-500">${label}</span>
+        <p class="text-sm text-slate-200 ${long ? 'line-clamp-2' : 'truncate'}">${value.replace(/\n/g, '<br>').substring(0, 200)}${value.length > 200 ? '...' : ''}</p>
+      </div>
+      <button onclick="copyText('${escaped}')"
+        class="flex-shrink-0 px-2.5 py-1 bg-slate-700 text-slate-300 rounded text-xs hover:bg-slate-600 hover:text-white">
+        Copy
+      </button>
+    </div>
+  `;
+}
+
+async function copyText(text) {
+  const decoded = text.replace(/\\n/g, '\n').replace(/\\'/g, "'");
+  try {
+    await navigator.clipboard.writeText(decoded);
+    showToast('Copied!');
+  } catch {
+    // Fallback
+    const ta = document.createElement('textarea');
+    ta.value = decoded;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+    showToast('Copied!');
+  }
+}
+
+async function markStatus(slug, status) {
+  await fetch(`/api/books/${slug}/status`, {
+    method: 'PATCH',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({status})
+  });
+  showToast(status === 'uploaded' ? 'Moved to Uploaded!' : 'Moved back to Queue!');
+  loadBooks();
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.remove('hidden');
+  t.classList.add('toast');
+  setTimeout(() => { t.classList.add('hidden'); t.classList.remove('toast'); }, 2000);
+}
+
+// Auto-login check
+fetch('/api/books').then(r => {
+  if (r.ok) {
+    document.getElementById('login-page').classList.add('hidden');
+    document.getElementById('dashboard').classList.remove('hidden');
+    r.json().then(data => { allBooks = data; updateCounts(); renderBooks(); });
+  }
+});
+</script>
+</body>
+</html>
