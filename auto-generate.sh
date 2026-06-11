@@ -33,7 +33,7 @@ Go!"
 
 # Run codex in non-interactive mode (subscription auth, NOT API key).
 # gpt-5.4 + low reasoning effort = plenty for content writing, keeps plan quota low.
-codex exec --skip-git-repo-check --ephemeral -s danger-full-access --search \
+codex --search exec --skip-git-repo-check --ephemeral -s danger-full-access \
   -m gpt-5.4 -c model_reasoning_effort="low" -c approval_policy="never" \
   -C /root "$PROMPT" >> "$LOG_FILE" 2>&1
 
